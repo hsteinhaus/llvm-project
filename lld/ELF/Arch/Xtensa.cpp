@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "InputFiles.h"
+#include "RelocScan.h"
 #include "Symbols.h"
 #include "Target.h"
 #include <bitset>
@@ -28,6 +29,12 @@ public:
   Xtensa(Ctx &ctx);
   RelExpr getRelExpr(RelType type, const Symbol &s,
                      const uint8_t *loc) const override;
+  template <class ELFT, class RelTy>
+  void scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
+                       unsigned shard);
+  void scanSection(InputSectionBase &sec, unsigned shard) override {
+    elf::scanSection1<Xtensa, ELF32LE>(*this, sec, shard);
+  }
   void relocate(uint8_t *loc, const Relocation &rel,
                 uint64_t val) const override;
 };
@@ -72,6 +79,7 @@ RelExpr Xtensa::getRelExpr(RelType type, const Symbol &s,
     // Because it's a relaxation hint, this relocation can be ignored for now
     // until linker relaxations are implemented.
     return R_NONE;
+  case R_XTENSA_NONE:
   case R_XTENSA_DIFF8:
   case R_XTENSA_DIFF16:
   case R_XTENSA_DIFF32:
@@ -92,6 +100,33 @@ RelExpr Xtensa::getRelExpr(RelType type, const Symbol &s,
     Err(ctx) << getErrorLoc(ctx, loc) << "unknown relocation (" << type.v
              << ") against symbol " << &s;
     return R_NONE;
+  }
+}
+
+// Relocation scanning no longer drops R_NONE on a target's behalf: a target
+// skips its marker relocations itself, as every in-tree target does. For
+// Xtensa these are R_XTENSA_NONE and the relaxation hints and differences GNU
+// as emits (R_XTENSA_ASM_EXPAND, R_XTENSA_*DIFF*), all R_NONE in getRelExpr;
+// handed on, they reach getRelocTargetVA as an invalid expression. The
+// precompiled Espressif Wi-Fi libraries carry them by the hundred.
+template <class ELFT, class RelTy>
+void Xtensa::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
+                             unsigned shard) {
+  RelocScan rs(ctx, &sec, shard);
+  sec.relocations.reserve(rels.size());
+  for (auto it = rels.begin(); it != rels.end(); ++it) {
+    const RelTy &rel = *it;
+    uint32_t symIdx = rel.getSymbol(false);
+    Symbol &sym = sec.getFile<ELFT>()->getSymbol(symIdx);
+    uint64_t offset = rel.r_offset;
+    RelType type = rel.getType(false);
+    if (sym.isUndefined() && symIdx != 0 &&
+        rs.maybeReportUndefined(cast<Undefined>(sym), offset))
+      continue;
+    RelExpr expr = getRelExpr(type, sym, sec.content().data() + offset);
+    if (expr == R_NONE)
+      continue;
+    rs.process(expr, type, offset, sym, rs.getAddend<ELFT>(rel, type));
   }
 }
 
