@@ -725,5 +725,13 @@ DecodeStatus XtensaDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
     }
   }
 
-  return Result;
+  // Unknown, but op0 fixes its length: report that, so the next one decodes.
+  uint8_t Op0 = Bytes[0] & 0xf;
+  if (hasDensity() && Op0 >= 0x8 && Op0 <= 0xd)
+    Size = 2;
+  else if (hasESP32S3Ops() && Op0 >= 0xe)
+    Size = 4;
+  else
+    Size = 3;
+  return MCDisassembler::Fail;
 }

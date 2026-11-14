@@ -218,6 +218,12 @@ def SSA8L : RRR_Inst<0x00, 0x00, 0x04, (outs), (ins AR:$s),
   let t = 0x0;
 }
 
+def SSA8B : RRR_Inst<0x00, 0x00, 0x04, (outs), (ins AR:$s),
+                    "ssa8b\t$s", []> {
+  let r = 0x3;
+  let t = 0x0;
+}
+
 def SSAI : RRR_Inst<0x00, 0x00, 0x04, (outs), (ins uimm5:$imm),
                    "ssai\t$imm", []> {
   bits<5> imm;
@@ -1106,6 +1112,18 @@ def SEXT : RRR_Inst<0x00, 0x03, 0x02, (outs AR:$r), (ins AR:$s, imm7_22:$imm),
 
 def : Pat<(i32 (sext_inreg AR:$s, i8)), (SEXT AR:$s, (i32 7))>;
 def : Pat<(i32 (sext_inreg AR:$s, i16)), (SEXT AR:$s, (i32 15))>;
+
+//===----------------------------------------------------------------------===//
+// SALT/SALTU Instructions: r = s < t (signed / unsigned), as 1 or 0
+//===----------------------------------------------------------------------===//
+
+// Assembler and disassembler only: no selection patterns, so codegen is unchanged.
+let hasSideEffects = 0 in {
+  def SALT : RRR_Inst<0x00, 0x02, 0x07, (outs AR:$r), (ins AR:$s, AR:$t),
+                      "salt\t$r, $s, $t", []>, Requires<[HasSALT]>;
+  def SALTU : RRR_Inst<0x00, 0x02, 0x06, (outs AR:$r), (ins AR:$s, AR:$t),
+                       "saltu\t$r, $s, $t", []>, Requires<[HasSALT]>;
+}
 
 //===----------------------------------------------------------------------===//
 // CLAMPS Instruction

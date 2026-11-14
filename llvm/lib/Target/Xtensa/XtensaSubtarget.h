@@ -71,6 +71,7 @@ public:
   bool hasLoop() const { return HasLoop; }
   bool hasSEXT() const { return HasSEXT; }
   bool hasCLAMPS() const { return HasCLAMPS; }
+  bool hasSALT() const { return HasSALT; }
   bool hasNSA() const { return HasNSA; }
   bool hasMINMAX() const { return HasMINMAX; }
   bool hasMul16() const { return HasMul16; }

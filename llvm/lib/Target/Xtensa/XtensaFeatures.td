@@ -43,6 +43,11 @@ def FeatureCLAMPS : SubtargetFeature<"clamps", "HasCLAMPS", "true",
 def HasCLAMPS : Predicate<"Subtarget->hasCLAMPS()">,
                 AssemblerPredicate<(all_of FeatureCLAMPS)>;
 
+def FeatureSALT : SubtargetFeature<"salt", "HasSALT", "true",
+                                   "Enable Xtensa SALT/SALTU (LX7) instructions">;
+def HasSALT : Predicate<"Subtarget->hasSALT()">,
+              AssemblerPredicate<(all_of FeatureSALT)>;
+
 def FeatureNSA : SubtargetFeature<"nsa", "HasNSA", "true",
                                   "Enable Xtensa NSA option">;
 def HasNSA : Predicate<"Subtarget->hasNSA()">,

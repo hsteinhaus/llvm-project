@@ -1,0 +1,19 @@
+# RUN: llvm-mc -triple=xtensa -mcpu=esp32s3 -disassemble %s | FileCheck %s
+# RUN: llvm-mc -triple=xtensa -mcpu=esp32 -disassemble %s 2>&1 \
+# RUN:     | FileCheck -check-prefix=CHECK-LX6 %s
+
+## An instruction a CPU lacks is still as long as its format says: the next
+## one decodes in step (here ret.n, after a SALT the ESP32 does not have).
+
+0x80 0x99 0x72 0x0d 0xf0
+# CHECK: salt a9, a9, a8
+# CHECK-NEXT: ret.n
+# CHECK-LX6: warning: invalid instruction encoding
+# CHECK-LX6: ret.n
+
+0x90 0xa8 0x62
+# CHECK: saltu a10, a8, a9
+
+## SSA8B (base ISA) is GNU's too.
+0x00 0x36 0x40
+# CHECK: ssa8b a6
