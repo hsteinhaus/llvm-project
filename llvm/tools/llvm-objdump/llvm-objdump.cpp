@@ -638,6 +638,11 @@ static bool isRISCVElf(const ObjectFile &Obj) {
   return Elf && Elf->getEMachine() == ELF::EM_RISCV;
 }
 
+static bool isXtensaElf(const ObjectFile &Obj) {
+  const auto *Elf = dyn_cast<ELFObjectFileBase>(&Obj);
+  return Elf && Elf->getEMachine() == ELF::EM_XTENSA;
+}
+
 static bool hasMappingSymbols(const ObjectFile &Obj) {
   return isArmElf(Obj) || isAArch64Elf(Obj) || isCSKYElf(Obj) ||
          isRISCVElf(Obj);
@@ -1450,6 +1455,59 @@ static bool shouldAdjustVA(const SectionRef &Section) {
 }
 
 typedef std::pair<uint64_t, char> MappingSymbolPair;
+
+// Xtensa's mapping symbols: GNU as's .xt.prop records {address, size, flags},
+// flag 0x2 for instructions, the rest data or padding a decoder must skip.
+// Linked images only; a relocatable object's addresses are still relocations.
+static void addXtensaPropertyMappings(
+    const ObjectFile &Obj,
+    std::map<SectionRef, SmallVector<MappingSymbolPair, 0>> &AllMappingSymbols) {
+  constexpr uint32_t XtensaPropInsn = 0x2;
+  if (!isXtensaElf(Obj) || Obj.isRelocatableObject())
+    return;
+  std::optional<SectionRef> Prop;
+  for (const SectionRef &Sec : Obj.sections())
+    if (Expected<StringRef> Name = Sec.getName(); Name && *Name == ".xt.prop")
+      Prop = Sec;
+    else if (!Name)
+      consumeError(Name.takeError());
+  if (!Prop)
+    return;
+  Expected<StringRef> Contents = Prop->getContents();
+  if (!Contents) {
+    reportWarning(toString(Contents.takeError()), Obj.getFileName());
+    return;
+  }
+  llvm::endianness Endian =
+      Obj.isLittleEndian() ? llvm::endianness::little : llvm::endianness::big;
+  // A data record's start overrides the 'x' ending the record before it.
+  std::map<uint64_t, char> Kinds;
+  SmallVector<std::tuple<uint64_t, uint64_t, bool>, 0> Records;
+  for (size_t I = 0; I + 12 <= Contents->size(); I += 12) {
+    const char *P = Contents->data() + I;
+    uint32_t Addr = support::endian::read32(P, Endian);
+    uint32_t Size = support::endian::read32(P + 4, Endian);
+    uint32_t Flags = support::endian::read32(P + 8, Endian);
+    if (Addr == 0 || Size == 0) // A discarded section's, or an empty one.
+      continue;
+    Records.emplace_back(Addr, Size, Flags & XtensaPropInsn);
+  }
+  for (auto [Addr, Size, IsInsn] : Records)
+    if (!IsInsn)
+      Kinds.emplace(Addr + Size, 'x');
+  for (auto [Addr, Size, IsInsn] : Records)
+    Kinds[Addr] = IsInsn ? 'x' : 'd';
+  for (const SectionRef &Sec : Obj.sections()) {
+    if (!Sec.isText())
+      continue;
+    uint64_t Start = Sec.getAddress(), End = Start + Sec.getSize();
+    auto &Mappings = AllMappingSymbols[Sec];
+    for (auto It = Kinds.lower_bound(Start); It != Kinds.end() && It->first < End;
+         ++It)
+      Mappings.emplace_back(It->first - Start, It->second);
+  }
+}
+
 static char getMappingSymbolKind(ArrayRef<MappingSymbolPair> MappingSymbols,
                                  uint64_t Address) {
   auto It =
@@ -1990,6 +2048,8 @@ disassembleObject(ObjectFile &Obj, const ObjectFile &DbgObj,
   if (Obj.isELF() && Obj.sections().empty())
     createFakeELFSections(Obj);
 
+  addXtensaPropertyMappings(Obj, AllMappingSymbols);
+
   DisassemblerTarget *PltTarget = DT;
   auto SectionNames = getSectionNames(Obj);
   if (SecondaryTarget && isArmElf(Obj)) {
@@ -2528,7 +2588,14 @@ disassembleObject(ObjectFile &Obj, const ObjectFile &DbgObj,
         }
 
         if (DumpARMELFData) {
-          Size = dumpARMELFData(SectionAddr, Index, End, Obj, Bytes,
+          // Data ends where the next mapping symbol starts code again.
+          auto Next = partition_point(MappingSymbols,
+                                      [Index](const MappingSymbolPair &Val) {
+                                        return Val.first <= Index;
+                                      });
+          uint64_t DataEnd =
+              Next == MappingSymbols.end() ? End : std::min(End, Next->first);
+          Size = dumpARMELFData(SectionAddr, Index, DataEnd, Obj, Bytes,
                                 MappingSymbols, *DT->SubtargetInfo, FOS);
         } else {
 

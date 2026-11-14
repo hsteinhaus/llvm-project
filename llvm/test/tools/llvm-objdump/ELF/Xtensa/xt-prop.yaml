@@ -1,0 +1,29 @@
+# RUN: yaml2obj %s -o %t
+# RUN: llvm-objdump -d --mcpu=esp32s3 %t | FileCheck %s
+
+## .xt.prop marks the byte after the jump as padding: it is dumped as data and
+## decoding resumes in step at the next record. A record at address 0 is a
+## discarded section's and is ignored.
+
+# CHECK:      1000: 06 ff ff     j 0x1000
+# CHECK-NEXT: 1003: 00           .byte 0x00
+# CHECK-NEXT: 1004: 48 74        l32i.n a4, a4, 28
+# CHECK-NEXT: 1006: 0d f0        ret.n
+
+--- !ELF
+FileHeader:
+  Class:   ELFCLASS32
+  Data:    ELFDATA2LSB
+  Type:    ET_EXEC
+  Machine: EM_XTENSA
+Sections:
+  - Name:    .text
+    Type:    SHT_PROGBITS
+    Flags:   [ SHF_ALLOC, SHF_EXECINSTR ]
+    Address: 0x1000
+    Content: 06FFFF0048740DF0
+  - Name:    .xt.prop
+    Type:    SHT_PROGBITS
+    ## {address, size, flags}: instructions, unreachable data, instructions,
+    ## and a discarded section's record.
+    Content: '001000000300000002000000031000000100000008010000041000000400000002000000000000000800000004000000'
