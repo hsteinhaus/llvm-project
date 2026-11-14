@@ -1,0 +1,98 @@
+# RUN: llvm-mc -triple=xtensa -mcpu=esp32s3 -disassemble %s | FileCheck %s
+
+## Each ESP32-S3 offset operand round-trips at its bounds, one step either side
+## of zero and zero: the field is signed (unsigned for the 128_* ones) and
+## counts units of the operand's step.
+
+[0x2f,0x28,0x30,0x80]
+# CHECK: ee.ldf.128.ip f0, f1, f2, f3, a2, -128
+
+[0x2f,0x2f,0x30,0x80]
+# CHECK: ee.ldf.128.ip f0, f1, f2, f3, a2, -16
+
+[0x2f,0x20,0x30,0x80]
+# CHECK: ee.ldf.128.ip f0, f1, f2, f3, a2, 0
+
+[0x2f,0x21,0x30,0x80]
+# CHECK: ee.ldf.128.ip f0, f1, f2, f3, a2, 16
+
+[0x2f,0x27,0x30,0x80]
+# CHECK: ee.ldf.128.ip f0, f1, f2, f3, a2, 112
+
+[0x2e,0x04,0x10,0xe2]
+# CHECK: ee.ldf.64.ip f0, f1, a2, -1024
+
+[0x2f,0x05,0x1f,0xe3]
+# CHECK: ee.ldf.64.ip f0, f1, a2, -8
+
+[0x2e,0x04,0x10,0xe0]
+# CHECK: ee.ldf.64.ip f0, f1, a2, 0
+
+[0x2e,0x05,0x10,0xe0]
+# CHECK: ee.ldf.64.ip f0, f1, a2, 8
+
+[0x2f,0x05,0x1f,0xe1]
+# CHECK: ee.ldf.64.ip f0, f1, a2, 1016
+
+[0x24,0x00,0x41]
+# CHECK: ee.ldqa.s16.128.ip a2, -2048
+
+[0x24,0x7f,0x41]
+# CHECK: ee.ldqa.s16.128.ip a2, -16
+
+[0x24,0x00,0x01]
+# CHECK: ee.ldqa.s16.128.ip a2, 0
+
+[0x24,0x01,0x01]
+# CHECK: ee.ldqa.s16.128.ip a2, 16
+
+[0x24,0x7f,0x01]
+# CHECK: ee.ldqa.s16.128.ip a2, 2032
+
+[0x24,0x00,0x5e]
+# CHECK: ee.ld.qacc_h.h.32.ip a2, -512
+
+[0x24,0x7f,0x5e]
+# CHECK: ee.ld.qacc_h.h.32.ip a2, -4
+
+[0x24,0x00,0x1e]
+# CHECK: ee.ld.qacc_h.h.32.ip a2, 0
+
+[0x24,0x01,0x1e]
+# CHECK: ee.ld.qacc_h.h.32.ip a2, 4
+
+[0x24,0x7f,0x1e]
+# CHECK: ee.ld.qacc_h.h.32.ip a2, 508
+
+[0x24,0x80,0x85]
+# CHECK: ee.vldbc.16.ip q1, a2, 0
+
+[0x24,0x81,0x85]
+# CHECK: ee.vldbc.16.ip q1, a2, 2
+
+[0x24,0xff,0x85]
+# CHECK: ee.vldbc.16.ip q1, a2, 254
+
+[0x24,0x80,0xc5]
+# CHECK: ee.vldbc.8.ip q1, a2, 0
+
+[0x24,0x81,0xc5]
+# CHECK: ee.vldbc.8.ip q1, a2, 1
+
+[0x24,0xff,0xc5]
+# CHECK: ee.vldbc.8.ip q1, a2, 127
+
+[0x2e,0xe0,0x08,0xf8]
+# CHECK: ee.vmulas.s16.accx.ld.ip q1, a2, -512, q3, q4
+
+[0x2e,0xef,0x08,0xfc]
+# CHECK: ee.vmulas.s16.accx.ld.ip q1, a2, -16, q3, q4
+
+[0x2e,0xe0,0x08,0xf0]
+# CHECK: ee.vmulas.s16.accx.ld.ip q1, a2, 0, q3, q4
+
+[0x2e,0xe1,0x08,0xf0]
+# CHECK: ee.vmulas.s16.accx.ld.ip q1, a2, 16, q3, q4
+
+[0x2e,0xef,0x08,0xf4]
+# CHECK: ee.vmulas.s16.accx.ld.ip q1, a2, 496, q3, q4
