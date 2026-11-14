@@ -1,0 +1,16 @@
+# RUN: llvm-mc -triple=xtensa -disassemble %s | FileCheck %s
+
+## L32R's 16-bit offset is one-extended: every literal lies 4 to 262144 bytes
+## below the instruction, including offsets past 128 KiB.
+
+[0x81,0xff,0xff]
+# CHECK: l32r a8, . -4
+
+[0x81,0x00,0x80]
+# CHECK: l32r a8, . -131072
+
+[0x81,0xff,0x7f]
+# CHECK: l32r a8, . -131076
+
+[0x81,0x00,0x00]
+# CHECK: l32r a8, . -262144
