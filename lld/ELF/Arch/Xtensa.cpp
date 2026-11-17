@@ -37,11 +37,27 @@ public:
   }
   void relocate(uint8_t *loc, const Relocation &rel,
                 uint64_t val) const override;
+  bool needsThunk(RelExpr expr, RelType type, const InputFile *file,
+                  uint64_t branchAddr, const Symbol &s,
+                  int64_t a) const override;
+  bool inBranchRange(RelType type, uint64_t src, uint64_t dst) const override;
+  uint32_t getThunkSectionSpacing() const override;
 };
+
+// CALL8: op0 0101, n = 2 in bits 4-5. The one call a thunk may stand in for: its callee's
+// ENTRY overwrites the caller's a9, which the thunk uses (call4 and call12 would lose a live
+// register).
+static bool isCall8(const uint8_t *loc) { return (loc[0] & 0x3f) == 0x25; }
+
+// R_XTENSA_SLOT0_OP on a CALL8, as the scan records it. Every slot-0 operand shares one ELF
+// type, and RelocScan turns R_PLT_PC into R_PC for any symbol a static link binds, so a call
+// keeps a type of its own; no object file carries it. Only this type gets a thunk: a branch
+// or an L32R sent through one would lose a9.
+static constexpr uint32_t R_XTENSA_CALL8 = 0x80000000 | R_XTENSA_SLOT0_OP;
 
 } // namespace
 
-Xtensa::Xtensa(Ctx &ctx) : TargetInfo(ctx) {}
+Xtensa::Xtensa(Ctx &ctx) : TargetInfo(ctx) { needsThunks = true; }
 
 RelExpr Xtensa::getRelExpr(RelType type, const Symbol &s,
                            const uint8_t *loc) const {
@@ -126,6 +142,8 @@ void Xtensa::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
     RelExpr expr = getRelExpr(type, sym, sec.content().data() + offset);
     if (expr == R_NONE)
       continue;
+    if (type == R_XTENSA_SLOT0_OP && isCall8(sec.content().data() + offset))
+      type = R_XTENSA_CALL8;
     rs.process(expr, type, offset, sym, rs.getAddend<ELFT>(rel, type));
   }
 }
@@ -185,6 +203,7 @@ void Xtensa::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     // instead of the intended in-section offset.
     write32le(loc, val + read32le(loc));
     break;
+  case R_XTENSA_CALL8:
   case R_XTENSA_SLOT0_OP: {
     // HACK: calculate the instruction location based on the PC-relative
     // relocation value.
@@ -243,6 +262,28 @@ void Xtensa::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     llvm_unreachable("unknown relocation");
   }
 }
+
+// CALLn adds an 18-bit word offset to its own address rounded down to 4: +/- 512 KiB.
+bool Xtensa::inBranchRange(RelType type, uint64_t src, uint64_t dst) const {
+  if (type != R_XTENSA_CALL8)
+    return true;
+  int64_t offset = dst - ((src + 4) & ~(uint64_t)3);
+  return (offset & 3) == 0 && isInt<18>(offset >> 2);
+}
+
+bool Xtensa::needsThunk(RelExpr expr, RelType type, const InputFile *file,
+                        uint64_t branchAddr, const Symbol &s,
+                        int64_t a) const {
+  if (type != R_XTENSA_CALL8)
+    return false;
+  // An undefined weak symbol resolves to 0; a branch to it is not ours to extend.
+  if (s.isUndefined())
+    return false;
+  return !inBranchRange(type, branchAddr, s.getVA(ctx, a));
+}
+
+// Thunk sections every 448 KiB, inside CALL8's 512 KiB with room for the thunks themselves.
+uint32_t Xtensa::getThunkSectionSpacing() const { return 0x70000; }
 
 void elf::setXtensaTargetInfo(Ctx &ctx) {
   ctx.target.reset(new Xtensa(ctx));

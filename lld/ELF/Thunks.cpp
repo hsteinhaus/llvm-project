@@ -431,6 +431,20 @@ public:
   void addSymbols(ThunkSection &isec) override;
 };
 
+// A CALL8 whose callee is beyond its 512 KiB: the call lands here and jumps on. The caller's
+// CALL8 has already set a8 (return address) and PS.CALLINC, which a jump keeps; a9 is free,
+// the callee's ENTRY overwrites it. Literal first, as L32R reaches only backwards.
+class XtensaCall8Thunk final : public Thunk {
+public:
+  XtensaCall8Thunk(Ctx &ctx, Symbol &dest, int64_t addend)
+      : Thunk(ctx, dest, addend) {
+    alignment = 4;
+  }
+  uint32_t size() override { return 12; }
+  void writeTo(uint8_t *buf) override;
+  void addSymbols(ThunkSection &isec) override;
+};
+
 // MIPS LA25 thunk
 class MipsThunk final : public Thunk {
 public:
@@ -1568,6 +1582,20 @@ void HexagonThunk::addSymbols(ThunkSection &isec) {
       STT_FUNC, 0, isec);
 }
 
+void XtensaCall8Thunk::writeTo(uint8_t *buf) {
+  write32(ctx, buf, destination.getVA(ctx, addend)); // the callee's address
+  const uint8_t code[] = {0x91, 0xff, 0xff,       // l32r a9, <buf>
+                          0xa0, 0x09, 0x00,       // jx   a9
+                          0x00, 0x00};            // padding, never reached
+  memcpy(buf + 4, code, sizeof(code));
+}
+
+void XtensaCall8Thunk::addSymbols(ThunkSection &isec) {
+  // The entry, after the literal: a CALL8 target is 4-aligned, and so is it.
+  addSymbol(saver().save("__Call8Thunk_" + destination.getName()), STT_FUNC, 4,
+            isec);
+}
+
 Thunk::Thunk(Ctx &ctx, Symbol &d, int64_t a)
     : ctx(ctx), destination(d), addend(a), offset(0) {
   destination.thunkAccessed = true;
@@ -1830,9 +1858,11 @@ std::unique_ptr<Thunk> elf::addThunk(Ctx &ctx, const InputSection &isec,
     return addThunkPPC64(ctx, rel.type, s, a);
   case EM_HEXAGON:
     return addThunkHexagon(ctx, isec, rel, s);
+  case EM_XTENSA:
+    return std::make_unique<XtensaCall8Thunk>(ctx, s, a);
   default:
-    llvm_unreachable(
-        "add Thunk only supported for ARM, AVR, Hexagon, Mips and PowerPC");
+    llvm_unreachable("add Thunk only supported for ARM, AVR, Hexagon, Mips, "
+                     "PowerPC and Xtensa");
   }
 }
 
