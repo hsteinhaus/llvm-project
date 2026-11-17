@@ -26,6 +26,7 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
@@ -36,13 +37,15 @@ using namespace llvm;
 
 #define DEBUG_TYPE "xtensa-lower"
 
+// A direct CALLn reaches 512 KiB either way; a long call loads the callee's address from a
+// literal and reaches anything, for 7 bytes more per call. Off, calls are direct and the
+// linker adds a range-extension thunk where a callee is out of reach (lld: CALL8).
+static cl::opt<bool>
+    XtensaLongCalls("xtensa-long-calls", cl::init(true), cl::Hidden,
+                    cl::desc("Call every function through a literal (L32R + CALLXn)"));
+
 // Return true if we must use long (in fact, indirect) function call.
-// It's simplified version, production implimentation must
-// resolve a functions in ROM (usually glibc functions)
-static bool isLongCall(const char *str) {
-  // Currently always use long calls
-  return true;
-}
+static bool isLongCall(const char *str) { return XtensaLongCalls; }
 
 // The calling conventions in XtensaCallingConv.td are described in terms of the
 // callee's register window. This function translates registers to the
@@ -971,11 +974,11 @@ XtensaTargetLowering::LowerCall(CallLoweringInfo &CLI,
     const GlobalValue *GV = G->getGlobal();
     name = GV->getName().str();
     if (auto *F = dyn_cast<Function>(GV))
-      if (F->hasFnAttribute("short-call")) {
+      if (F->hasFnAttribute("short-call"))
         HasShortCallAttr = true;
-        Callee = DAG.getTargetGlobalAddress(
-            G->getGlobal(), DL, Callee.getValueType(), 0, 0 /* TargetFlags */);
-      }
+    if (HasShortCallAttr || !isLongCall(name.c_str()))
+      Callee = DAG.getTargetGlobalAddress(
+          G->getGlobal(), DL, Callee.getValueType(), G->getOffset(), 0 /* TargetFlags */);
   }
 
   if (!name.empty() && isLongCall(name.c_str()) && !HasShortCallAttr) {
